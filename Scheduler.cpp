@@ -149,7 +149,7 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
         Machine_SetState(target_machine, S0);
         SimOutput("MigrationComplete(): Ensuring target machine " + to_string(target_machine) +
                       " is in S0 state for VM " + to_string(vm_id),
-                  3);
+                  0);
     }
 
     migrating_vms.erase(vm_id);
@@ -159,12 +159,12 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
         machine_with_task[task_id] = target_machine;
         SimOutput("MigrationComplete(): Updated task " + to_string(task_id) +
                       " mapping to machine " + to_string(target_machine),
-                  3);
+                  0);
     }
 
     SimOutput("MigrationComplete(): VM " + to_string(vm_id) +
                   " successfully migrated to machine " + to_string(target_machine),
-              2);
+              0);
 }
 
 #include <climits>
@@ -972,7 +972,7 @@ void Scheduler::SLAWarning(Time_t time, TaskId_t task_id)
                     Machine_SetState(machine_id, S0);
                     SimOutput("SLAWarning(): Waking up GPU machine " + to_string(machine_id) +
                                   " for SLA violation",
-                              2);
+                              0);
                     continue; // Skip for now, will be available in next check
                 }
 
@@ -986,7 +986,7 @@ void Scheduler::SLAWarning(Time_t time, TaskId_t task_id)
                                   " from machine " + to_string(current_machine) +
                                   " (util: " + to_string(current_util) + ") to GPU machine " +
                                   to_string(machine_id) + " (util: " + to_string(target_util) + ")",
-                              1);
+                              0);
                     MigrateVM(hosting_vm, machine_id);
                     migrated = true;
                     break;
@@ -1012,7 +1012,7 @@ void Scheduler::SLAWarning(Time_t time, TaskId_t task_id)
                 Machine_SetState(machine_id, S0);
                 SimOutput("SLAWarning(): Waking up machine " + to_string(machine_id) +
                               " for SLA violation",
-                          2);
+                          0);
                 continue; // Skip for now, will be available in next check
             }
 
@@ -1026,7 +1026,7 @@ void Scheduler::SLAWarning(Time_t time, TaskId_t task_id)
                               " from machine " + to_string(current_machine) +
                               " (util: " + to_string(current_util) + ") to machine " +
                               to_string(machine_id) + " (util: " + to_string(target_util) + ")",
-                          1);
+                          0);
                 MigrateVM(hosting_vm, machine_id);
                 migrated = true;
                 break;
@@ -1038,7 +1038,7 @@ void Scheduler::SLAWarning(Time_t time, TaskId_t task_id)
     {
         SimOutput("SLAWarning(): Could not find better machine for task " +
                       to_string(task_id) + ". All compatible machines have higher utilization.",
-                  2);
+                  0);
     }
 
     recentlyHandledSLAs.insert(task_id);
@@ -1056,7 +1056,7 @@ void Scheduler::MigrateVM(VMId_t vm, MachineId_t target_machine)
         SimOutput("MigrateVM(): Source machine " + to_string(vmInfo.machine_id) +
                       " is not in S0 state. Current state: " + to_string(sourceInfo.s_state) +
                       ". Cannot migrate VM " + to_string(vm),
-                  2);
+                  0);
         return;
     }
 
@@ -1065,13 +1065,13 @@ void Scheduler::MigrateVM(VMId_t vm, MachineId_t target_machine)
         SimOutput("MigrateVM(): Target machine " + to_string(target_machine) +
                       " is not in S0 state. Current state: " + to_string(targetInfo.s_state) +
                       ". Cannot migrate VM " + to_string(vm),
-                  2);
+                  0);
 
         if (targetInfo.s_state != S0)
         {
             SimOutput("MigrateVM(): Attempting to wake up target machine " +
                           to_string(target_machine),
-                      2);
+                      0);
             Machine_SetState(target_machine, S0);
         }
         return;
@@ -1094,7 +1094,7 @@ void Scheduler::MigrateVM(VMId_t vm, MachineId_t target_machine)
     SimOutput("MigrateVM(): Migrating VM " + to_string(vm) +
                   " from machine " + to_string(vmInfo.machine_id) +
                   " to machine " + to_string(target_machine),
-              3);
+              0);
 
     try
     {
@@ -1170,13 +1170,13 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id)
     {
         SimOutput("StateChangeComplete(): Machine " + to_string(machine_id) +
                       " is not in S0 state yet. Current state: " + to_string(machine_info.s_state),
-                  3);
+                  0);
         return; // Don't process attachments until machine is fully awake
     }
 
     SimOutput("StateChangeComplete(): Machine " + to_string(machine_id) +
                   " is now in S0 state. Processing pending attachments.",
-              3);
+              0);
 
     for (auto it = pendingAttachments.begin(); it != pendingAttachments.end();)
     {
@@ -1187,13 +1187,13 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id)
             {
                 SimOutput("StateChangeComplete(): Machine " + to_string(machine_id) +
                               " state changed during processing. Skipping attachments.",
-                          3);
+                          0);
                 return; // Exit if machine state changed
             }
 
             SimOutput("StateChangeComplete(): Attaching pending VM " + to_string(it->vm) +
                           " on machine " + to_string(machine_id),
-                      3);
+                      0);
             try
             {
                 VM_Attach(it->vm, machine_id);
@@ -1206,7 +1206,7 @@ void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id)
             {
                 SimOutput("StateChangeComplete(): Failed to attach pending VM " + to_string(it->vm) +
                               " on machine " + to_string(machine_id) + " due to error",
-                          3);
+                          0);
                 ++it;
             }
         }
@@ -1223,19 +1223,19 @@ static Scheduler Scheduler;
 
 void InitScheduler()
 {
-    SimOutput("InitScheduler(): Initializing scheduler", 4);
+    SimOutput("InitScheduler(): Initializing scheduler", 0);
     Scheduler.Init();
 }
 
 void HandleNewTask(Time_t time, TaskId_t task_id)
 {
-    SimOutput("HandleNewTask(): Received new task " + to_string(task_id) + " at time " + to_string(time), 4);
+    SimOutput("HandleNewTask(): Received new task " + to_string(task_id) + " at time " + to_string(time), 0);
     Scheduler.NewTask(time, task_id);
 }
 
 void HandleTaskCompletion(Time_t time, TaskId_t task_id)
 {
-    SimOutput("HandleTaskCompletion(): Task " + to_string(task_id) + " completed at time " + to_string(time), 4);
+    SimOutput("HandleTaskCompletion(): Task " + to_string(task_id) + " completed at time " + to_string(time), 0);
     Scheduler.TaskComplete(time, task_id);
 }
 
