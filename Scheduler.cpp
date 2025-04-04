@@ -17,6 +17,14 @@ static bool migrating = false;
 static unsigned active_machines = 16;
 
 /**
+ * Note: comments before each function were added by AI in order to better understand the
+ * purpose of each function and clarify implementations.
+ *
+ * However, AI was unable to work with the specific implementation details so the code is
+ * 99% written by us.
+ **/
+
+/**
  * Initialize the scheduler
  *
  * Discovers all available machines, creates VMs for running tier machines,
@@ -182,13 +190,6 @@ double Scheduler::CalculateTaskCPUUtilization(TaskId_t task_id)
     return demand;
 }
 
-static vector<MachineId_t> cachedSortedMachines;
-static vector<MachineId_t> fixedSortedMachines; // Fixed pre-sorted machines for extremely fast access
-static bool fixedSortInitialized = false;
-static Time_t lastSortTime = 0;
-static const Time_t SORT_INTERVAL = 5000000; // Resort every 5 seconds (increased from 1 second)
-static unordered_map<MachineId_t, double> cachedUtilMap;
-
 /**
  * Calculate appropriate tier sizes based on workload
  *
@@ -263,33 +264,6 @@ double Scheduler::GetMachineLoad(MachineId_t machineId)
 {
     MachineInfo_t info = Machine_GetInfo(machineId);
     return info.memory_size > 0 ? (double)info.memory_used / info.memory_size : 0.0;
-}
-
-/**
- * Check if a machine is suitable for a task
- *
- * Verifies CPU compatibility and memory availability.
- *
- * @param machineId ID of the machine to check
- * @param taskId ID of the task to check
- * @return True if the machine is suitable for the task, false otherwise
- */
-bool Scheduler::IsMachineSuitable(MachineId_t machineId, TaskId_t taskId)
-{
-    MachineInfo_t info = Machine_GetInfo(machineId);
-
-    if (info.cpu != RequiredCPUType(taskId))
-    {
-        return false;
-    }
-
-    unsigned taskMemory = GetTaskMemory(taskId);
-    if (info.memory_used + taskMemory > info.memory_size)
-    {
-        return false;
-    }
-
-    return true;
 }
 
 /**
@@ -523,8 +497,6 @@ MachineId_t Scheduler::FindCompatibleMachine(CPUType_t cpuType, bool includeInte
     return (MachineId_t)-1;
 }
 
-static unordered_map<MachineId_t, unordered_map<VMType_t, vector<VMId_t>>> vmsByMachineAndType;
-
 /**
  * Handle new task arrival
  *
@@ -748,25 +720,6 @@ bool Scheduler::IsVMReady(VMId_t vm)
     if (machineInfo.s_state != S0) // S5 means powered off
         return false;
     return true;
-}
-
-string pendingAttachmentsToString(const std::vector<Scheduler::PendingAttachment> &attachments)
-{
-    std::ostringstream oss;
-    oss << "[";
-    for (size_t i = 0; i < attachments.size(); ++i)
-    {
-        const auto &pa = attachments[i];
-        oss << "{vm: " << pa.vm
-            << ", machine_id: " << pa.machine_id
-            << ", task_id: " << pa.task_id
-            << ", priority: " << pa.priority
-            << ", demand: " << pa.demand << "}";
-        if (i != attachments.size() - 1)
-            oss << ", ";
-    }
-    oss << "]";
-    return oss.str();
 }
 
 static const Time_t MIGRATION_INTERVAL = 20000000; // 20 seconds between migrations (increased from 5)
@@ -1151,15 +1104,6 @@ unsigned Scheduler::CalculateMachineMIPS(MachineId_t machine_id)
     default:
         return machine_info.performance[3];
     }
-}
-
-/*
- * This function gives us how much memory is required for a task
- */
-double Scheduler::CalculateTaskMemoryUtilization(TaskId_t task_id)
-{
-    TaskInfo_t task = GetTaskInfo(task_id);
-    return task.required_memory;
 }
 
 void Scheduler::StateChangeComplete(Time_t time, MachineId_t machine_id)

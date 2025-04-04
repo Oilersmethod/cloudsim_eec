@@ -18,6 +18,9 @@
 
 /**
  * Class that implements the full-power algorithm for cloud scheduling
+ * Note: The comments were added before these functions with the help of AI to understand the function
+ * of each upcall and downcall before beginning implementation. We added comments in a similar fashion
+ * to any new functions we wrote as well.
  *
  * This scheduler maximizes performance and minimizes SLA violations with the following strategies:
  * 1. Keeps all machines powered on (S0 state) at all times
@@ -220,7 +223,6 @@ private:
 
     // E-eco tier management
     map<MachineId_t, HostTier> machineTiers;             // Track which tier each machine belongs to
-    map<MachineId_t, unsigned> machineLoads;             // Track current load for each machine
     map<CPUType_t, vector<MachineId_t>> cpuTypeMachines; // Group machines by CPU type
 
     // Tier calculation and management
@@ -242,7 +244,6 @@ private:
 
     // Pending attachments for handling machine state changes
     vector<PendingAttachment> pendingAttachments;
-    unordered_set<MachineId_t> transitioningMachines;
 };
 
 #endif /* Scheduler_hpp */
