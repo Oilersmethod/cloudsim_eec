@@ -218,6 +218,9 @@ private:
     unordered_map<MachineId_t, float> mips_util_map;
     unordered_map<TaskId_t, MachineId_t> machine_with_task;
 
+    // VM indexing for efficient lookups - reduces time complexity from O(T×M×V) to O(T×M)
+    unordered_map<MachineId_t, unordered_map<VMType_t, vector<VMId_t>>> vmsByMachineAndType;
+
     // E-eco tier management
     map<MachineId_t, HostTier> machineTiers;             // Track which tier each machine belongs to
     map<MachineId_t, unsigned> machineLoads;             // Track current load for each machine

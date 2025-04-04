@@ -21,11 +21,14 @@ static unsigned active_machines = 16;
  *
  * Discovers all available machines, creates VMs for running tier machines,
  * and initializes the three-tier system.
+ *
+ * Note: AI was used to write the comments for the functions as well as
+ * suggest reasonable tier sizes.
  */
 void Scheduler::Init()
 {
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 0);
-    SimOutput("Scheduler::Init(): Initializing E-eco scheduler", 0);
+    SimOutput("Scheduler::Init(): Initializing E-eco scheduler with VM indexing optimization", 0);
     active_machines = Machine_GetTotal();
 
     unsigned totalMachines = Machine_GetTotal();
@@ -37,6 +40,8 @@ void Scheduler::Init()
                   ", Intermediate: " + to_string(intermediateSize) +
                   ", Switched Off: " + to_string(totalMachines - runningSize - intermediateSize),
               0);
+
+    vmsByMachineAndType.clear();
 
     for (unsigned i = 0; i < totalMachines; i++)
     {
@@ -57,10 +62,12 @@ void Scheduler::Init()
                 VMId_t new_vm = VM_Create(LINUX, RISCV);
                 linux.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX].push_back(new_vm);
 
                 new_vm = VM_Create(LINUX_RT, RISCV);
                 linux_rt.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX_RT].push_back(new_vm);
                 break;
             }
             case POWER:
@@ -68,14 +75,17 @@ void Scheduler::Init()
                 VMId_t new_vm = VM_Create(LINUX, POWER);
                 linux.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX].push_back(new_vm);
 
                 new_vm = VM_Create(LINUX_RT, POWER);
                 linux_rt.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX_RT].push_back(new_vm);
 
                 new_vm = VM_Create(AIX, POWER);
                 aix.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][AIX].push_back(new_vm);
                 break;
             }
             case ARM:
@@ -83,14 +93,17 @@ void Scheduler::Init()
                 VMId_t new_vm = VM_Create(LINUX, ARM);
                 linux.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX].push_back(new_vm);
 
                 new_vm = VM_Create(LINUX_RT, ARM);
                 linux_rt.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX_RT].push_back(new_vm);
 
                 new_vm = VM_Create(WIN, ARM);
                 win.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][WIN].push_back(new_vm);
                 break;
             }
             case X86:
@@ -98,14 +111,17 @@ void Scheduler::Init()
                 VMId_t new_vm = VM_Create(LINUX, X86);
                 linux.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX].push_back(new_vm);
 
                 new_vm = VM_Create(LINUX_RT, X86);
                 linux_rt.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][LINUX_RT].push_back(new_vm);
 
                 new_vm = VM_Create(WIN, X86);
                 win.push_back(new_vm);
                 VM_Attach(new_vm, MachineId_t(i));
+                vmsByMachineAndType[MachineId_t(i)][WIN].push_back(new_vm);
                 break;
             }
             default:
@@ -131,12 +147,14 @@ void Scheduler::Init()
     SimOutput("Scheduler::Init(): Created " + to_string(vms.size()) + " VMs across " +
                   to_string(runningSize) + " running machines",
               0);
+    SimOutput("Scheduler::Init(): VM indexing optimization enabled for O(T×M) time complexity", 0);
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
 {
     VMInfo_t vmInfo = VM_GetInfo(vm_id);
     MachineId_t target_machine = vmInfo.machine_id;
+    VMType_t vm_type = vmInfo.vm_type;
 
     if (vm_id == 2 && target_machine == 13)
     {
@@ -151,7 +169,14 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id)
         return;
     }
 
+    vmsByMachineAndType[target_machine][vm_type].push_back(vm_id);
+
     migrating_vms.erase(vm_id);
+
+    SimOutput("MigrationComplete(): VM " + to_string(vm_id) +
+                  " migration completed to machine " + to_string(target_machine) +
+                  ", updated VM index map",
+              3);
 }
 
 #include <climits>
@@ -304,85 +329,119 @@ vector<MachineId_t> Scheduler::SortMachinesByUtilization()
  */
 void Scheduler::AdjustTiers(Time_t now)
 {
-    double systemLoad = GetSystemLoad();
-    SimOutput("AdjustTiers(): Current system load: " + to_string(systemLoad), 0);
+    static double cachedSystemLoad = 0.0;
+    static Time_t lastLoadCalculation = 0;
+    static const Time_t LOAD_CACHE_INTERVAL = 5000000; // 5 seconds
+
+    if (now - lastLoadCalculation >= LOAD_CACHE_INTERVAL)
+    {
+        cachedSystemLoad = GetSystemLoad();
+        lastLoadCalculation = now;
+    }
+
+    double systemLoad = cachedSystemLoad;
+    SimOutput("AdjustTiers(): Current system load: " + to_string(systemLoad), 3);
 
     unsigned activeWorkload = machine_with_task.size();
-
     unsigned totalMachines = Machine_GetTotal();
     unsigned runningSize, intermediateSize;
+
     CalculateTierSizes(totalMachines, activeWorkload, runningSize, intermediateSize);
 
-    unsigned currentRunning = 0;
-    unsigned currentIntermediate = 0;
-    unsigned currentSwitchedOff = 0;
+    static unsigned currentRunning = 0;
+    static unsigned currentIntermediate = 0;
+    static unsigned currentSwitchedOff = 0;
 
-    for (auto &entry : machineTiers)
-    {
-        switch (entry.second)
+    if (now % 15000000 < 1000000)
+    { // Recalculate approximately every 15 seconds
+        currentRunning = 0;
+        currentIntermediate = 0;
+        currentSwitchedOff = 0;
+
+        for (auto &entry : machineTiers)
         {
-        case RUNNING:
-            currentRunning++;
-            break;
-        case INTERMEDIATE:
-            currentIntermediate++;
-            break;
-        case SWITCHED_OFF:
-            currentSwitchedOff++;
-            break;
+            switch (entry.second)
+            {
+            case RUNNING:
+                currentRunning++;
+                break;
+            case INTERMEDIATE:
+                currentIntermediate++;
+                break;
+            case SWITCHED_OFF:
+                currentSwitchedOff++;
+                break;
+            }
         }
     }
 
     SimOutput("AdjustTiers(): Current tiers - Running: " + to_string(currentRunning) +
                   ", Intermediate: " + to_string(currentIntermediate) +
                   ", Switched Off: " + to_string(currentSwitchedOff),
-              0);
+              3);
     SimOutput("AdjustTiers(): Target tiers - Running: " + to_string(runningSize) +
                   ", Intermediate: " + to_string(intermediateSize),
-              0);
+              3);
 
-    if (systemLoad > HIGH_LOAD_THRESHOLD && currentRunning < runningSize)
+    if (systemLoad > HIGH_LOAD_THRESHOLD && currentRunning < runningSize &&
+        (runningSize - currentRunning) > totalMachines / 10)
     {
-        unsigned machinesNeeded = runningSize - currentRunning;
+
+        unsigned machinesNeeded = std::min(runningSize - currentRunning, totalMachines / 10);
+        unsigned machinesActivated = 0;
 
         for (auto &entry : machineTiers)
         {
-            if (machinesNeeded == 0)
+            if (machinesActivated >= machinesNeeded)
                 break;
 
             if (entry.second == INTERMEDIATE)
             {
                 ActivateMachine(entry.first, now);
-                machinesNeeded--;
+                machinesActivated++;
+                currentRunning++;
+                currentIntermediate--;
             }
         }
 
-        if (machinesNeeded > 0)
+        if (machinesActivated < machinesNeeded)
         {
             for (auto &entry : machineTiers)
             {
-                if (machinesNeeded == 0)
+                if (machinesActivated >= machinesNeeded)
                     break;
 
                 if (entry.second == SWITCHED_OFF)
                 {
                     entry.second = INTERMEDIATE;
-
                     ActivateMachine(entry.first, now);
-                    machinesNeeded--;
+                    machinesActivated++;
+                    currentRunning++;
+                    currentSwitchedOff--;
                 }
             }
         }
     }
-    else if (systemLoad < LOW_LOAD_THRESHOLD && currentRunning > runningSize)
+    else if (systemLoad < LOW_LOAD_THRESHOLD && currentRunning > runningSize &&
+             (currentRunning - runningSize) > totalMachines / 10)
     {
-        unsigned excessMachines = currentRunning - runningSize;
 
-        vector<MachineId_t> sortedMachines = SortMachinesByUtilization();
+        unsigned excessMachines = std::min(currentRunning - runningSize, totalMachines / 10);
+        unsigned machinesDeactivated = 0;
 
-        for (auto machine_id : sortedMachines)
+        static vector<MachineId_t> cachedSortedMachines;
+        static Time_t lastSortTime = 0;
+        static const Time_t SORT_INTERVAL = 15000000; // 15 seconds
+
+        if (now - lastSortTime >= SORT_INTERVAL)
         {
-            if (excessMachines == 0)
+            cachedSortedMachines = SortMachinesByUtilization();
+            lastSortTime = now;
+        }
+
+        for (auto machine_id : cachedSortedMachines)
+        {
+            if (machinesDeactivated >= excessMachines)
                 break;
 
             if (machineTiers[machine_id] == RUNNING)
@@ -391,7 +450,9 @@ void Scheduler::AdjustTiers(Time_t now)
                 if (minfo.active_vms == 0)
                 {
                     DeactivateMachine(machine_id, now);
-                    excessMachines--;
+                    machinesDeactivated++;
+                    currentRunning--;
+                    currentIntermediate++;
                 }
             }
         }
@@ -414,14 +475,14 @@ void Scheduler::ActivateMachine(MachineId_t machineId, Time_t now)
         {
             SimOutput("ActivateMachine(): Waking up machine " + to_string(machineId) +
                           " from state " + to_string(minfo.s_state),
-                      0);
+                      2);
             Machine_SetState(machineId, S0);
         }
 
         machineTiers[machineId] = RUNNING;
         SimOutput("ActivateMachine(): Machine " + to_string(machineId) +
                       " moved to RUNNING tier",
-                  0);
+                  2);
     }
 }
 
@@ -442,7 +503,7 @@ void Scheduler::DeactivateMachine(MachineId_t machineId, Time_t now)
             machineTiers[machineId] = INTERMEDIATE;
             SimOutput("DeactivateMachine(): Machine " + to_string(machineId) +
                           " moved to INTERMEDIATE tier",
-                      0);
+                      2);
 
             double systemLoad = GetSystemLoad();
             if (systemLoad < LOW_LOAD_THRESHOLD / 2)
@@ -451,7 +512,7 @@ void Scheduler::DeactivateMachine(MachineId_t machineId, Time_t now)
                 Machine_SetState(machineId, S5);
                 SimOutput("DeactivateMachine(): Machine " + to_string(machineId) +
                               " moved to SWITCHED_OFF tier and powered off",
-                          0);
+                          2);
             }
         }
     }
@@ -563,29 +624,30 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             MachineInfo_t machine_info = Machine_GetInfo(machine_id);
 
             bool vmFound = false;
-            for (size_t i = 0; i < vms.size(); i++)
+
+            auto machineIt = vmsByMachineAndType.find(machine_id);
+            if (machineIt != vmsByMachineAndType.end())
             {
-                VMInfo_t vm_info = VM_GetInfo(vms[i]);
-                if (vm_info.machine_id == machine_id &&
-                    vm_info.vm_type == vm_type &&
-                    vm_info.cpu == cpu_type)
+                auto typeIt = machineIt->second.find(vm_type);
+                if (typeIt != machineIt->second.end() && !typeIt->second.empty())
                 {
-
-                    if (!IsVMReady(vms[i]))
+                    for (VMId_t vm : typeIt->second)
                     {
-                        continue;
+                        VMInfo_t vm_info = VM_GetInfo(vm);
+                        if (vm_info.cpu == cpu_type && IsVMReady(vm))
+                        {
+                            SimOutput("NewTask(): Assigning task " + to_string(task_id) +
+                                          " to VM " + to_string(vm) +
+                                          " on machine " + to_string(machine_id),
+                                      3);
+                            VM_AddTask(vm, task_id, priority);
+                            mips_util_map[machine_id] += taskLoad;
+                            machine_with_task[task_id] = machine_id;
+                            vmFound = true;
+                            placed = true;
+                            break;
+                        }
                     }
-
-                    SimOutput("NewTask(): Assigning task " + to_string(task_id) +
-                                  " to VM " + to_string(vms[i]) +
-                                  " on machine " + to_string(machine_id),
-                              0);
-                    VM_AddTask(vms[i], task_id, priority);
-                    mips_util_map[machine_id] += taskLoad;
-                    machine_with_task[task_id] = machine_id;
-                    vmFound = true;
-                    placed = true;
-                    break;
                 }
             }
 
@@ -600,10 +662,13 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
                     mips_util_map[machine_id] += taskLoad;
                     machine_with_task[task_id] = machine_id;
                     vms.push_back(new_vm);
+
+                    vmsByMachineAndType[machine_id][vm_type].push_back(new_vm);
+
                     placed = true;
                     SimOutput("NewTask(): Created new VM " + to_string(new_vm) +
                                   " on machine " + to_string(machine_id),
-                              0);
+                              3);
                 }
                 catch (...)
                 {
@@ -640,7 +705,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
 
             SimOutput("NewTask(): Activating machine " + to_string(machine_id) +
                           " for task " + to_string(task_id),
-                      0);
+                      2);
             placed = true;
         }
     }
@@ -703,12 +768,7 @@ static const Time_t MIGRATION_INTERVAL = 20000000; // 20 seconds between migrati
 void Scheduler::PeriodicCheck(Time_t now)
 {
     static Time_t lastTierAdjustment = 0;
-    static const Time_t TIER_ADJUSTMENT_INTERVAL = 10000000; // 10 seconds between tier adjustments
-
-    if (now - lastTierAdjustment < TIER_ADJUSTMENT_INTERVAL)
-    {
-        return;
-    }
+    static const Time_t TIER_ADJUSTMENT_INTERVAL = 30000000; // 30 seconds between tier adjustments (increased from 10)
 
     for (auto it = pendingAttachments.begin(); it != pendingAttachments.end();)
     {
@@ -739,9 +799,11 @@ void Scheduler::PeriodicCheck(Time_t now)
         }
     }
 
-    AdjustTiers(now);
-
-    lastTierAdjustment = now;
+    if (now - lastTierAdjustment >= TIER_ADJUSTMENT_INTERVAL)
+    {
+        AdjustTiers(now);
+        lastTierAdjustment = now;
+    }
 }
 
 void Scheduler::Shutdown(Time_t time)
@@ -892,6 +954,20 @@ void Scheduler::MigrateVM(VMId_t vm, MachineId_t target_machine)
     mips_util_map[vmInfo.machine_id] -= vmTotalDemand;
     mips_util_map[target_machine] += vmTotalDemand;
 
+    auto sourceIt = vmsByMachineAndType.find(vmInfo.machine_id);
+    if (sourceIt != vmsByMachineAndType.end())
+    {
+        auto typeIt = sourceIt->second.find(vmInfo.vm_type);
+        if (typeIt != sourceIt->second.end())
+        {
+            auto &vmList = typeIt->second;
+            vmList.erase(std::remove(vmList.begin(), vmList.end(), vm), vmList.end());
+            SimOutput("MigrateVM(): Removed VM " + to_string(vm) +
+                          " from index map for machine " + to_string(vmInfo.machine_id),
+                      4);
+        }
+    }
+
     migrating_vms.insert(vm);
     SimOutput("MigrateVM(): Migrating VM " + to_string(vm) +
                   " from machine " + to_string(vmInfo.machine_id) +
@@ -915,6 +991,11 @@ void Scheduler::MigrateVM(VMId_t vm, MachineId_t target_machine)
         {
             machine_with_task[t_id] = vmInfo.machine_id;
         }
+
+        vmsByMachineAndType[vmInfo.machine_id][vmInfo.vm_type].push_back(vm);
+        SimOutput("MigrateVM(): Migration failed, added VM " + to_string(vm) +
+                      " back to index map for machine " + to_string(vmInfo.machine_id),
+                  4);
 
         migrating_vms.erase(vm);
     }
