@@ -20,9 +20,9 @@
  * Class that implements the resource-aware energy scheduling algorithm
  *
  * This scheduler optimizes resource utilization and energy efficiency with the following strategies:
- * 1. Computes optimal utilization across all resources (CPU, memory, disk)
+ * 1. Computes optimal utilization across all resources (CPU, memory)
  * 2. Minimizes root mean square (RMS) of resource utilization for placement decisions
- * 3. Uses resource-specific thresholds (CPU: 0.7, Disk: 0.5) for optimal performance
+ * 3. Uses resource-specific thresholds (CPU: 0.7) for optimal performance
  * 4. Ensures CPU compatibility for task allocation
  *
  * The resource-aware algorithm balances SLA performance with energy efficiency
@@ -233,7 +233,6 @@ private:
 
     // Resource-aware thresholds
     const double CPU_THRESHOLD = 0.7;    // 70% CPU utilization threshold
-    const double DISK_THRESHOLD = 0.5;   // 50% disk utilization threshold
     const double MEMORY_THRESHOLD = 0.6; // 60% memory utilization threshold
 
     // Calculate RMS of resource utilization

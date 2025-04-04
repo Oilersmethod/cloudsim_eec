@@ -38,13 +38,11 @@ double Scheduler::CalculateRMSUtilization(MachineId_t machine_id, double taskCpu
 
     double normalizedCpuUtil = cpuUtil / CPU_THRESHOLD;
     double normalizedMemUtil = memUtil / MEMORY_THRESHOLD;
-    double normalizedDiskUtil = memUtil / DISK_THRESHOLD; // Using memory as proxy for disk
 
     double sumSquares = (normalizedCpuUtil * normalizedCpuUtil) +
-                        (normalizedMemUtil * normalizedMemUtil) +
-                        (normalizedDiskUtil * normalizedDiskUtil);
+                        (normalizedMemUtil * normalizedMemUtil);
 
-    return std::sqrt(sumSquares / 3.0);
+    return std::sqrt(sumSquares / 2.0);
 }
 
 /**
@@ -581,7 +579,7 @@ static unordered_map<MachineId_t, unordered_map<VMType_t, vector<VMId_t>>> vmsBy
  * Handle new task arrival
  *
  * Implements the resource-aware energy scheduling algorithm:
- * 1. Computes RMS utilization across CPU, memory, and disk resources
+ * 1. Computes RMS utilization across CPU and memory resources
  * 2. Places tasks on machines that minimize RMS utilization
  * 3. Prioritizes GPU machines for GPU-capable tasks
  * 4. Powers on machines only when needed to save energy
