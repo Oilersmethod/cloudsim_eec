@@ -305,7 +305,7 @@ vector<MachineId_t> Scheduler::SortMachinesByUtilization()
 void Scheduler::AdjustTiers(Time_t now)
 {
     double systemLoad = GetSystemLoad();
-    SimOutput("AdjustTiers(): Current system load: " + to_string(systemLoad), 3);
+    SimOutput("AdjustTiers(): Current system load: " + to_string(systemLoad), 0);
 
     unsigned activeWorkload = machine_with_task.size();
 
@@ -336,10 +336,10 @@ void Scheduler::AdjustTiers(Time_t now)
     SimOutput("AdjustTiers(): Current tiers - Running: " + to_string(currentRunning) +
                   ", Intermediate: " + to_string(currentIntermediate) +
                   ", Switched Off: " + to_string(currentSwitchedOff),
-              3);
+              0);
     SimOutput("AdjustTiers(): Target tiers - Running: " + to_string(runningSize) +
                   ", Intermediate: " + to_string(intermediateSize),
-              3);
+              0);
 
     if (systemLoad > HIGH_LOAD_THRESHOLD && currentRunning < runningSize)
     {
@@ -414,14 +414,14 @@ void Scheduler::ActivateMachine(MachineId_t machineId, Time_t now)
         {
             SimOutput("ActivateMachine(): Waking up machine " + to_string(machineId) +
                           " from state " + to_string(minfo.s_state),
-                      2);
+                      0);
             Machine_SetState(machineId, S0);
         }
 
         machineTiers[machineId] = RUNNING;
         SimOutput("ActivateMachine(): Machine " + to_string(machineId) +
                       " moved to RUNNING tier",
-                  2);
+                  0);
     }
 }
 
@@ -442,7 +442,7 @@ void Scheduler::DeactivateMachine(MachineId_t machineId, Time_t now)
             machineTiers[machineId] = INTERMEDIATE;
             SimOutput("DeactivateMachine(): Machine " + to_string(machineId) +
                           " moved to INTERMEDIATE tier",
-                      2);
+                      0);
 
             double systemLoad = GetSystemLoad();
             if (systemLoad < LOW_LOAD_THRESHOLD / 2)
@@ -451,7 +451,7 @@ void Scheduler::DeactivateMachine(MachineId_t machineId, Time_t now)
                 Machine_SetState(machineId, S5);
                 SimOutput("DeactivateMachine(): Machine " + to_string(machineId) +
                               " moved to SWITCHED_OFF tier and powered off",
-                          2);
+                          0);
             }
         }
     }
@@ -579,7 +579,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
                     SimOutput("NewTask(): Assigning task " + to_string(task_id) +
                                   " to VM " + to_string(vms[i]) +
                                   " on machine " + to_string(machine_id),
-                              3);
+                              0);
                     VM_AddTask(vms[i], task_id, priority);
                     mips_util_map[machine_id] += taskLoad;
                     machine_with_task[task_id] = machine_id;
@@ -603,7 +603,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
                     placed = true;
                     SimOutput("NewTask(): Created new VM " + to_string(new_vm) +
                                   " on machine " + to_string(machine_id),
-                              3);
+                              0);
                 }
                 catch (...)
                 {
@@ -640,7 +640,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
 
             SimOutput("NewTask(): Activating machine " + to_string(machine_id) +
                           " for task " + to_string(task_id),
-                      2);
+                      0);
             placed = true;
         }
     }
