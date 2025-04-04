@@ -178,40 +178,51 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
     bool gpu_capable = IsTaskGPUCapable(task_id);
     SLAType_t sla = RequiredSLA(task_id);
 
-    Priority_t priority = (sla == SLA0) ? HIGH_PRIORITY : (sla == SLA1) ? MID_PRIORITY
-                                                                        : LOW_PRIORITY;
+    Priority_t priority = (sla == SLA0)   ? HIGH_PRIORITY
+                          : (sla == SLA1) ? MID_PRIORITY
+                                          : LOW_PRIORITY;
 
     double taskLoad = CalculateTaskCPUUtilization(task_id);
     bool placed = false;
 
+    // Get all machines sorted by utilization (in increasing order)
     vector<MachineId_t> sortedMachines = SortMachinesByUtilization();
 
+    // Scan all powered-on (S0) machines that meet basic requirements and
+    // choose the machine that minimizes the combined utilization after adding the task.
+    MachineId_t bestMachine = UINT_MAX;
+    double bestCombinedUtil = std::numeric_limits<double>::max();
     for (auto machine_id : sortedMachines)
     {
         MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+        // Only consider machines that are already powered on.
         if (machine_info.s_state != S0)
             continue;
-
         if (machine_info.cpu != cpu_type)
             continue;
-
         if (gpu_capable && !machine_info.gpus)
             continue;
-
         if (machine_info.memory_size - machine_info.memory_used < memory)
             continue;
 
         double machineCapacity = (double)CalculateMachineMIPS(machine_id);
         double currentLoad = mips_util_map.count(machine_id) ? mips_util_map[machine_id] : 0.0;
         double combinedUtil = (currentLoad + taskLoad) / machineCapacity;
+        // Note: We allow combinedUtil to be >= 1.0 (overcommitment) if necessary.
+        if (combinedUtil < bestCombinedUtil)
+        {
+            bestCombinedUtil = combinedUtil;
+            bestMachine = machine_id;
+        }
+    }
 
-        if (combinedUtil >= 1.0)
-            continue; // Skip if would overload
-
+    if (bestMachine != UINT_MAX)
+    {
+        // Try to assign the task to an existing VM on bestMachine.
         for (auto vm_id : vms)
         {
             VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.machine_id != machine_id)
+            if (vm_info.machine_id != bestMachine)
                 continue;
             if (vm_info.vm_type != vm_type || vm_info.cpu != cpu_type)
                 continue;
@@ -219,35 +230,73 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
                 continue;
 
             VM_AddTask(vm_id, task_id, priority);
-            mips_util_map[machine_id] += taskLoad;
-            machine_with_task[task_id] = machine_id;
+            mips_util_map[bestMachine] += taskLoad;
+            machine_with_task[task_id] = bestMachine;
             SimOutput("NewTask(): Assigned task " + to_string(task_id) +
                           " to existing VM " + to_string(vm_id) +
-                          " on machine " + to_string(machine_id),
+                          " on machine " + to_string(bestMachine),
                       0);
             placed = true;
             break;
         }
 
-        if (placed)
-            break;
-
-        VMId_t new_vm = VM_Create(vm_type, cpu_type);
-        try
+        // If no suitable VM exists, create a new one on bestMachine.
+        if (!placed)
         {
-            VM_Attach(new_vm, machine_id);
-            VM_AddTask(new_vm, task_id, priority);
-            mips_util_map[machine_id] += taskLoad;
-            machine_with_task[task_id] = machine_id;
-            SimOutput("NewTask(): Created new VM " + to_string(new_vm) +
-                          " for task " + to_string(task_id) +
-                          " on machine " + to_string(machine_id),
-                      0);
-            placed = true;
-            break;
+            VMId_t new_vm = VM_Create(vm_type, cpu_type);
+            try
+            {
+                VM_Attach(new_vm, bestMachine);
+                VM_AddTask(new_vm, task_id, priority);
+                mips_util_map[bestMachine] += taskLoad;
+                machine_with_task[task_id] = bestMachine;
+                SimOutput("NewTask(): Created new VM " + to_string(new_vm) +
+                              " for task " + to_string(task_id) +
+                              " on machine " + to_string(bestMachine),
+                          0);
+                placed = true;
+            }
+            catch (...)
+            {
+                // If attaching the VM fails, add to pending attachments.
+                PendingAttachment pa;
+                pa.vm = new_vm;
+                pa.machine_id = bestMachine;
+                pa.task_id = task_id;
+                pa.priority = priority;
+                pa.demand = taskLoad;
+                pendingAttachments.push_back(pa);
+                mips_util_map[bestMachine] += taskLoad;
+                machine_with_task[task_id] = bestMachine;
+                SimOutput("NewTask(): Created VM " + to_string(new_vm) +
+                              " (pending attachment) for task " + to_string(task_id),
+                          0);
+                placed = true;
+            }
         }
-        catch (...)
+    }
+    else
+    {
+        // No powered-on machine could host the task. Try to wake up a machine that meets basic requirements.
+        for (auto machine_id : machines)
         {
+            MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+            // Only consider machines that are currently not in S0.
+            if (machine_info.s_state == S0 || machine_info.cpu != cpu_type)
+                continue;
+            if (gpu_capable && !machine_info.gpus)
+                continue;
+            if (machine_info.memory_size < memory)
+                continue;
+
+            // Wake up the machine.
+            Machine_SetState(machine_id, S0);
+            SimOutput("NewTask(): Waking up machine " + to_string(machine_id) +
+                          " for future placement of task " + to_string(task_id),
+                      2);
+
+            // Create a new VM for this task and add a pending attachment.
+            VMId_t new_vm = VM_Create(vm_type, cpu_type);
             PendingAttachment pa;
             pa.vm = new_vm;
             pa.machine_id = machine_id;
@@ -257,40 +306,17 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id)
             pendingAttachments.push_back(pa);
             mips_util_map[machine_id] += taskLoad;
             machine_with_task[task_id] = machine_id;
-            SimOutput("NewTask(): Created VM " + to_string(new_vm) +
-                          " (pending attachment) for task " + to_string(task_id),
-                      0);
             placed = true;
             break;
         }
-    }
 
-    if (!placed)
-    {
-        for (auto machine_id : machines)
+        if (!placed)
         {
-            MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-
-            if (machine_info.s_state == S0 || machine_info.cpu != cpu_type)
-                continue;
-
-            if (gpu_capable && !machine_info.gpus)
-                continue;
-
-            if (machine_info.memory_size < memory)
-                continue;
-
-            Machine_SetState(machine_id, S0);
-            SimOutput("NewTask(): Waking up machine " + to_string(machine_id) +
-                          " for future placement of task " + to_string(task_id),
-                      2);
-            break;
+            SimOutput("NewTask(): Could not place task " + to_string(task_id) +
+                          " with load " + to_string(taskLoad) +
+                          " due to insufficient capacity. SLA violation.",
+                      0);
         }
-
-        SimOutput("NewTask(): Could not place task " + to_string(task_id) +
-                      " with load " + to_string(taskLoad) +
-                      " due to insufficient capacity. SLA violation.",
-                  0);
     }
 }
 
